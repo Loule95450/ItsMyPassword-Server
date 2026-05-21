@@ -39,10 +39,24 @@ jobs:
           push: false
           tags: itsmypassword-server:ci
           load: true
-      - name: Trivy scan
+      # Library scan — fails the build on any HIGH/CRITICAL in our app
+      # dependencies (lockfile we control). Refresh lockfile to fix.
+      - name: Trivy scan (app libs)
         uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: itsmypassword-server:ci
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
+          vuln-type: library
+
+      # OS scan — informational only. Base image is distroless/Debian which
+      # we can't patch ourselves; we rely on upstream rebuilds.
+      - name: Trivy scan (OS, informational)
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: itsmypassword-server:ci
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: os
