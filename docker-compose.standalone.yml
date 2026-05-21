@@ -1,0 +1,84 @@
+# Standalone stack: ItsMyPassword + Caddy with automatic Let's Encrypt
+# TLS. Use this on a VPS where ports 80/443 are free and you don't have
+# another reverse proxy.
+#
+# Quickstart:
+#   cp .env.example .env
+#   # edit .env: set SERVER_HMAC_KEY, DOMAIN, ACME_EMAIL
+#   docker compose -f docker-compose.standalone.yml up -d
+
+services:
+  app:
+    image: ghcr.io/itsmypassword/server:latest
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      DATABASE_PATH: /data/itsmypassword.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: "true"
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SERVER_HMAC_KEY: ${SERVER_HMAC_KEY:?Set SERVER_HMAC_KEY in .env — generate with: openssl rand -base64 32}
+    volumes:
+      - data:/data
+    expose:
+      - "8080"
+    networks: [edge]
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env (e.g. sync.example.com)}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    configs:
+      - source: Caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+
+configs:
+  Caddyfile:
+    content: |
+      {
+        email {$ACME_EMAIL}
+        servers {
+          protocols h1 h2 h3
+        }
+      }
+
+      {$DOMAIN} {
+        encode zstd gzip
+
+        header {
+          Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+          X-Content-Type-Options    "nosniff"
+          Referrer-Policy           "no-referrer"
+          Permissions-Policy        "interest-cohort=()"
+          -Server
+        }
+
+        request_body {
+          max_size 2MB
+        }
+
+        reverse_proxy app:8080 {
+          header_up X-Forwarded-Proto {scheme}
+          header_up X-Forwarded-For   {remote}
+        }
+      }
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:

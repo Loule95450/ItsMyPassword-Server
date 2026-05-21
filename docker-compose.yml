@@ -1,39 +1,38 @@
+# ItsMyPassword sync server — drop-in stack for Portainer, Synology
+# Container Manager, Unraid, or plain `docker compose up -d`.
+#
+# Use this file when you already have a reverse proxy in front (Synology
+# DSM Reverse Proxy, Traefik, nginx, Cloudflare Tunnel…). For a standalone
+# stack with automatic TLS via Caddy + Let's Encrypt, see
+# docker-compose.standalone.yml.
+
 services:
   app:
-    build: .
-    image: itsmypassword-server:latest
+    image: ghcr.io/itsmypassword/server:latest
+    container_name: itsmypassword
     restart: unless-stopped
-    env_file: .env
+    # Bind to host 0.0.0.0:${HOST_PORT:-8080}. Change HOST_PORT in .env or
+    # in the Portainer/Synology environment screen if 8080 is taken.
+    ports:
+      - "${HOST_PORT:-8080}:8080"
     environment:
-      DATABASE_PATH: /data/itsmypassword.db
       HOST: 0.0.0.0
       PORT: 8080
+      DATABASE_PATH: /data/itsmypassword.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SERVER_HMAC_KEY: ${SERVER_HMAC_KEY:?Set SERVER_HMAC_KEY in .env — generate with: openssl rand -base64 32}
     volumes:
       - data:/data
-    expose:
-      - "8080"
-    networks: [edge]
-  caddy:
-    image: caddy:2.8-alpine
-    restart: unless-stopped
-    depends_on:
-      - app
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks: [edge]
+    # Distroless has no shell; we check liveness with a tiny exec via the
+    # bundled node binary.
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
 volumes:
   data:
-  caddy_data:
-  caddy_config:
-
-networks:
-  edge:
