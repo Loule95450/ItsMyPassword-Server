@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
@@ -78,6 +79,21 @@ export async function buildApp(
   });
 
   await app.register(sensible);
+
+  // Browser extensions, mobile webviews, and second-origin Web UIs all need
+  // CORS to be able to reach the API. The list of allowed origins is
+  // configured via CORS_ORIGINS (comma-separated). When empty, CORS is
+  // effectively disabled — the same-origin model (Caddy + the API on one
+  // hostname) suffices and no preflight is allowed.
+  if (config.corsOrigins.length > 0) {
+    await app.register(cors, {
+      origin: [...config.corsOrigins],
+      methods: ["GET", "POST", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Authorization", "Content-Type"],
+      maxAge: 600,
+      credentials: false,
+    });
+  }
 
   await app.register(rateLimit, {
     global: true,
