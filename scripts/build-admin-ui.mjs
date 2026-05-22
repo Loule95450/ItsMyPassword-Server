@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 /**
- * Builds the admin UI in two passes:
- *   1. Tailwind v4 CLI compiles src/admin-ui/client/style.css → static/admin.css
- *   2. esbuild bundles src/admin-ui/client/main.ts → static/admin.js
- *
- * Both outputs land next to index.html and are served as static
- * assets by /admin/ui/.
+ * Build the admin UI:
+ *   1. Tailwind v4 CLI compiles client/style.css → static/admin.css
+ *   2. esbuild bundles client/index.tsx (Preact JSX) → static/admin.js
  */
 import { build } from "esbuild";
 import { spawn } from "node:child_process";
@@ -35,9 +32,9 @@ await run("npx", [
   "--minify",
 ]);
 
-console.log("→ esbuild admin.js");
+console.log("→ esbuild admin.js (Preact JSX)");
 await build({
-  entryPoints: [path.join(root, "src/admin-ui/client/main.ts")],
+  entryPoints: [path.join(root, "src/admin-ui/client/index.tsx")],
   outfile: path.join(root, "src/admin-ui/static/admin.js"),
   bundle: true,
   format: "esm",
@@ -46,6 +43,8 @@ await build({
   minify: true,
   sourcemap: false,
   legalComments: "none",
+  jsx: "automatic",
+  jsxImportSource: "preact",
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });

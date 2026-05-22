@@ -44,6 +44,37 @@
   --color-danger-soft: oklch(0.55 0.18 25 / 0.12);
   --color-success: oklch(0.55 0.13 150);
   --color-success-soft: oklch(0.55 0.13 150 / 0.12);
+
+  /* Ambient background — shared with the marketing site. */
+  --color-dot: 0.28 0.004 260;
+  --vignette-stop: oklch(0.85 0.004 260 / 0.45);
+  --vignette-edge: oklch(0.7 0.004 260 / 0.85);
+  --grain-mix: multiply;
+  --grain-opacity: 0.04;
+
+  --animate-breathe: breathe 6.2s ease-in-out infinite;
+  --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
+
+  @keyframes breathe {
+    0%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+    50% {
+      transform: translateY(-3px) scale(1.018);
+    }
+  }
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.15);
+    }
+  }
 }
 
 :root.dark {
@@ -67,6 +98,12 @@
   --color-danger-soft: oklch(0.7 0.18 25 / 0.16);
   --color-success: oklch(0.7 0.13 150);
   --color-success-soft: oklch(0.7 0.13 150 / 0.16);
+
+  --color-dot: 0.92 0.004 260;
+  --vignette-stop: oklch(0.06 0.004 260 / 0.55);
+  --vignette-edge: oklch(0.04 0.004 260 / 0.95);
+  --grain-mix: overlay;
+  --grain-opacity: 0.035;
 }
 
 @layer base {
@@ -159,8 +196,8 @@
   }
 
   .surface {
-    @apply rounded-2xl border border-(--color-ink-5) bg-(--color-bg-1)
-      p-6 transition-colors duration-300;
+    @apply rounded-2xl border border-(--color-ink-5) bg-(--color-bg-1)/80
+      p-6 backdrop-blur-md transition-colors duration-300;
   }
 
   .input {
@@ -217,7 +254,7 @@
 
   .row-entry {
     @apply flex items-center justify-between gap-3 p-4 rounded-2xl
-      border border-(--color-ink-5) bg-(--color-bg-0)
+      border border-(--color-ink-5) bg-(--color-bg-0)/70 backdrop-blur
       transition-colors duration-150 hover:border-(--color-ink-4);
   }
 

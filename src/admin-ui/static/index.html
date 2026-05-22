@@ -17,163 +17,17 @@
         } catch (e) {
           /* localStorage blocked — fall through to light */
         }
+        try {
+          var loc = localStorage.getItem("impw.admin.locale.v1");
+          if (loc === "fr" || loc === "en") document.documentElement.lang = loc;
+        } catch (e) {
+          /* ignore */
+        }
       })();
     </script>
   </head>
   <body class="font-sans">
-    <header class="border-b border-(--color-ink-5) bg-(--color-bg-1)/60 backdrop-blur">
-      <div class="mx-auto max-w-3xl flex items-center justify-between px-6 h-14">
-        <div class="flex items-center gap-3">
-          <span class="inline-block h-2 w-2 rounded-full bg-(--color-accent)"></span>
-          <strong class="text-sm tracking-tight text-(--color-ink-0)">ItsMyPassword</strong>
-          <span class="mono-tag border-l border-(--color-ink-5) pl-3">Admin</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span id="who" class="text-xs text-(--color-ink-3)"></span>
-          <button id="theme-toggle" class="theme-toggle" aria-label="Basculer le thème" title="Thème">
-            <svg class="icon-sun" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <circle cx="8" cy="8" r="3.2" fill="currentColor" />
-              <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                <line x1="8" y1="1.6" x2="8" y2="3" />
-                <line x1="8" y1="13" x2="8" y2="14.4" />
-                <line x1="1.6" y1="8" x2="3" y2="8" />
-                <line x1="13" y1="8" x2="14.4" y2="8" />
-                <line x1="3.2" y1="3.2" x2="4.3" y2="4.3" />
-                <line x1="11.7" y1="11.7" x2="12.8" y2="12.8" />
-                <line x1="3.2" y1="12.8" x2="4.3" y2="11.7" />
-                <line x1="11.7" y1="4.3" x2="12.8" y2="3.2" />
-              </g>
-            </svg>
-            <svg class="icon-moon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M8 1.6A6.4 6.4 0 1 0 14.4 8 5 5 0 0 1 8 1.6Z"
-              />
-            </svg>
-          </button>
-          <button id="logout-btn" class="btn-ghost btn-sm" hidden>Se déconnecter</button>
-        </div>
-      </div>
-    </header>
-
-    <main class="mx-auto max-w-3xl px-6 py-12">
-      <!-- LOADING -->
-      <section id="view-loading" class="surface">
-        <p class="text-(--color-ink-3) m-0">Chargement…</p>
-      </section>
-
-      <!-- SETUP -->
-      <section id="view-setup" hidden class="flex flex-col gap-6">
-        <header class="flex flex-col gap-2">
-          <h1 class="m-0 text-3xl font-semibold tracking-[-0.025em] headline-gradient">
-            Bienvenue.
-          </h1>
-          <p class="m-0 text-(--color-ink-2) max-w-prose">
-            Cette installation n'a pas encore d'administrateur. Crée le tien
-            ci-dessous. Ce compte servira à approuver les utilisateurs qui
-            demandent à synchroniser leur extension sur ce serveur.
-          </p>
-        </header>
-        <form id="setup-form" class="surface flex flex-col gap-5">
-          <label class="flex flex-col gap-1.5">
-            <span class="mono-tag">Nom d'utilisateur</span>
-            <input type="text" id="setup-username" class="input" autocomplete="username" minlength="3" maxlength="64" required />
-          </label>
-          <label class="flex flex-col gap-1.5">
-            <span class="mono-tag">Mot de passe</span>
-            <input type="password" id="setup-password" class="input" autocomplete="new-password" minlength="8" required />
-            <small class="text-xs text-(--color-ink-3) leading-relaxed">
-              Choisis un mot de passe long et unique. Il sera traité par OPAQUE :
-              le serveur ne le verra jamais en clair, même pendant que tu le tapes.
-            </small>
-          </label>
-          <label class="flex flex-col gap-1.5">
-            <span class="mono-tag">Confirme le mot de passe</span>
-            <input type="password" id="setup-password-2" class="input" autocomplete="new-password" required />
-          </label>
-          <p id="setup-error" class="callout callout-danger" hidden></p>
-          <div class="flex justify-end">
-            <button type="submit" id="setup-submit" class="btn-primary">Créer mon compte admin</button>
-          </div>
-        </form>
-        <p class="text-xs text-(--color-ink-3)">
-          Une fois ton compte créé, le setup est verrouillé : plus personne ne pourra ouvrir cet écran.
-        </p>
-      </section>
-
-      <!-- LOGIN -->
-      <section id="view-login" hidden class="flex flex-col gap-6">
-        <header class="flex flex-col gap-2">
-          <h1 class="m-0 text-3xl font-semibold tracking-[-0.025em] headline-gradient">
-            Connexion administrateur
-          </h1>
-          <p class="m-0 text-(--color-ink-2)">Identifie-toi pour voir les demandes en attente.</p>
-        </header>
-        <form id="login-form" class="surface flex flex-col gap-5">
-          <label class="flex flex-col gap-1.5">
-            <span class="mono-tag">Nom d'utilisateur</span>
-            <input type="text" id="login-username" class="input" autocomplete="username" required />
-          </label>
-          <label class="flex flex-col gap-1.5">
-            <span class="mono-tag">Mot de passe</span>
-            <input type="password" id="login-password" class="input" autocomplete="current-password" required />
-          </label>
-          <p id="login-error" class="callout callout-danger" hidden></p>
-          <div class="flex justify-end">
-            <button type="submit" id="login-submit" class="btn-primary">Se connecter</button>
-          </div>
-        </form>
-      </section>
-
-      <!-- DASHBOARD -->
-      <section id="view-dashboard" hidden class="flex flex-col gap-6">
-        <header class="flex items-baseline justify-between gap-4">
-          <div class="flex flex-col gap-1">
-            <h1 class="m-0 text-3xl font-semibold tracking-[-0.025em] headline-gradient">
-              Utilisateurs
-            </h1>
-            <p class="m-0 text-(--color-ink-2)">
-              Approuve, refuse, révoque ou supprime les comptes de synchronisation.
-            </p>
-          </div>
-          <button id="refresh-btn" class="btn-ghost btn-sm">Rafraîchir</button>
-        </header>
-
-        <nav class="flex flex-wrap gap-1.5" role="tablist" aria-label="Filtrer par statut">
-          <button class="tab" data-filter="pending"   aria-pressed="true">En attente <span data-count="pending"   class="pill pill-warn">0</span></button>
-          <button class="tab" data-filter="approved"  aria-pressed="false">Approuvés  <span data-count="approved"  class="pill pill-success">0</span></button>
-          <button class="tab" data-filter="rejected"  aria-pressed="false">Refusés    <span data-count="rejected"  class="pill pill-danger">0</span></button>
-          <button class="tab" data-filter="all"       aria-pressed="false">Tous       <span data-count="all"       class="pill pill-neutral">0</span></button>
-        </nav>
-
-        <section class="surface p-0 overflow-hidden">
-          <ul id="users-list" class="flex flex-col">
-            <li class="p-6 text-(--color-ink-3) text-sm">Chargement…</li>
-          </ul>
-        </section>
-      </section>
-
-      <!-- CONFIRMATION dialog overlay -->
-      <div id="confirm-overlay" hidden class="fixed inset-0 bg-(--color-ink-0)/55 backdrop-blur flex items-center justify-center p-6 z-50">
-        <div class="surface max-w-md w-full flex flex-col gap-4">
-          <strong id="confirm-title" class="text-base text-(--color-ink-0)"></strong>
-          <p id="confirm-body" class="m-0 text-sm text-(--color-ink-2)"></p>
-          <label id="confirm-reason-wrap" hidden class="flex flex-col gap-1.5">
-            <span class="mono-tag">Raison (facultatif)</span>
-            <input type="text" id="confirm-reason" class="input" maxlength="256" />
-          </label>
-          <div class="flex justify-end gap-2">
-            <button id="confirm-cancel" class="btn-ghost btn-sm" type="button">Annuler</button>
-            <button id="confirm-ok"     class="btn-danger btn-sm" type="button">Confirmer</button>
-          </div>
-        </div>
-      </div>
-    </main>
-
-    <footer class="py-6 text-center text-xs text-(--color-ink-3)">
-      ItsMyPassword Server — Admin
-    </footer>
-
+    <div id="app"></div>
     <script type="module" src="./admin.js"></script>
   </body>
 </html>
