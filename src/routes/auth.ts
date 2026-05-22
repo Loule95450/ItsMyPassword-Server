@@ -133,17 +133,73 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
         kdfParams: req.body.kdfParams,
         devicePubkey: Buffer.from(req.body.devicePubkey),
         deviceLabel: req.body.deviceLabel ?? null,
+        approvalStatus: "pending",
       });
-      const session = deps.sessions.create(user.id, device.id);
       deps.audit.log({
         userId: user.id,
         deviceId: device.id,
         action: "register",
         ipHash: hmacIp(req.ip, deps.hmacKey),
+        metadata: { approval_status: "pending" },
       });
+      // We do NOT issue a session token here — the user is pending. They
+      // poll /auth/approval-status to know when the admin approves.
       return reply.send({
         userId: user.id.toString("hex"),
         deviceId: device.id.toString("hex"),
+        approvalStatus: "pending" as const,
+      });
+    },
+  );
+
+  // --- GET /auth/approval-status/:userId -----------------------------------
+  // Poll target for the wizard after register/finish. Returns one of:
+  //   { status: 'pending' }
+  //   { status: 'approved', sessionToken, expiresAt }
+  //   { status: 'rejected', reason?: string }
+  // The endpoint is unauthenticated by design — the user does not yet
+  // hold a session token. It does NOT leak whether a userId exists: we
+  // respond 'pending' for any unknown id with a small randomised delay.
+  app.get<{ Params: { userId: string } }>(
+    "/auth/approval-status/:userId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["userId"],
+          properties: { userId: { type: "string", pattern: "^[0-9a-f]{32}$" } },
+          additionalProperties: false,
+        } as any,
+      },
+    },
+    async (req, reply) => {
+      const userId = Buffer.from(req.params.userId, "hex");
+      const user = deps.users.findById(userId);
+      if (!user) {
+        // Slight delay so a probe cannot distinguish unknown id from
+        // pending in tight timing.
+        await new Promise((r) => setTimeout(r, 25 + Math.random() * 25));
+        return reply.send({ status: "pending" });
+      }
+      if (user.approvalStatus === "pending") {
+        return reply.send({ status: "pending" });
+      }
+      if (user.approvalStatus === "rejected") {
+        return reply.send({
+          status: "rejected",
+          ...(user.rejectionReason !== null ? { reason: user.rejectionReason } : {}),
+        });
+      }
+      // approved → issue a session token bound to the device we created
+      // at register/finish.
+      const devices = deps.users.listDevices(user.id);
+      const device = devices[0];
+      if (!device) {
+        return reply.code(500).send({ error: "no_device_for_user" });
+      }
+      const session = deps.sessions.create(user.id, device.id);
+      return reply.send({
+        status: "approved",
         sessionToken: session.token,
         expiresAt: session.expiresAt,
       });
@@ -273,6 +329,23 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
           ipHash,
         });
         return reply.code(401).send({ error: "invalid_login" });
+      }
+
+      // Approval gate: an existing user whose status is not 'approved'
+      // cannot get a session, regardless of OPAQUE success.
+      const userRow = deps.users.findById(challenge.userId);
+      if (!userRow) return reply.code(401).send({ error: "invalid_login" });
+      if (userRow.approvalStatus === "pending") {
+        return reply.code(403).send({
+          error: "pending_approval",
+          userId: userRow.id.toString("hex"),
+        });
+      }
+      if (userRow.approvalStatus === "rejected") {
+        return reply.code(403).send({
+          error: "rejected",
+          ...(userRow.rejectionReason !== null ? { reason: userRow.rejectionReason } : {}),
+        });
       }
 
       // Find-or-create the device by pubkey for this user.
