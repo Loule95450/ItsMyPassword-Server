@@ -11,10 +11,14 @@ import { createChallengeService } from "./auth/challenges.js";
 import { createLoginRateLimiter } from "./auth/ratelimit.js";
 import { createSessionService } from "./auth/sessions.js";
 import type { Config } from "./config/env.js";
+import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { syncRoutes } from "./routes/sync.js";
+import { createAdminChallengeService } from "./auth/admin-challenges.js";
+import { createAdminSessionService } from "./auth/admin-sessions.js";
 import { createAuditLogger } from "./store/audit.js";
+import { createAdminRepo } from "./store/admins.js";
 import { migrate, openStore } from "./store/db.js";
 import { createSyncRepo } from "./store/sync.js";
 import { createUserRepo } from "./store/users.js";
@@ -42,6 +46,9 @@ export async function buildApp(
   const ratelimitLogin = createLoginRateLimiter(store.db);
   const audit = createAuditLogger(store.db);
   const sync = createSyncRepo(store.db);
+  const admins = createAdminRepo(store.db);
+  const adminSessions = createAdminSessionService(store.db);
+  const adminChallenges = createAdminChallengeService(store.db);
 
   const app = Fastify({
     logger: {
@@ -117,10 +124,26 @@ export async function buildApp(
   await app.register(async (instance) => {
     await syncRoutes(instance, { sync, sessions });
   });
+  await app.register(async (instance) => {
+    await adminRoutes(instance, {
+      opaque,
+      admins,
+      users,
+      sessions: adminSessions,
+      challenges: adminChallenges,
+      audit,
+      hmacKey: config.serverHmacKey,
+    });
+  });
 
   app.setNotFoundHandler((_req, reply) => {
     reply.code(404).send({ error: "not_found" });
   });
+
+  // Expose the raw DB handle for integration tests. Production paths
+  // never read this property.
+   
+  (app as any).__store_db = store.db;
 
   app.addHook("onClose", async () => {
     store.close();
@@ -131,6 +154,8 @@ export async function buildApp(
     try {
       sessions.purgeExpired();
       challenges.purgeExpired();
+      adminSessions.purgeExpired();
+      adminChallenges.purgeExpired();
       ratelimitLogin.purgeOld();
     } catch (err) {
       app.log.warn({ err }, "background purge failed");

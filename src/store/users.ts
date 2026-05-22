@@ -6,6 +6,8 @@ import type { Database } from "better-sqlite3";
 
 import { newUuidV7 } from "../crypto/ids.js";
 
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+
 export interface UserRow {
   id: Buffer;
   emailHash: Buffer;
@@ -13,6 +15,16 @@ export interface UserRow {
   kdfParams: string;
   createdAt: number;
   updatedAt: number;
+  approvalStatus: ApprovalStatus;
+  approvalDecidedAt: number | null;
+  approvalDecidedBy: Buffer | null;
+  rejectionReason: string | null;
+}
+
+export interface PendingUserRow {
+  id: Buffer;
+  emailHash: Buffer;
+  createdAt: number;
 }
 
 export interface DeviceRow {
@@ -33,7 +45,15 @@ export interface UserRepo {
     kdfParams: string;
     devicePubkey: Buffer;
     deviceLabel: string | null;
+    approvalStatus?: ApprovalStatus;
   }): { user: UserRow; device: DeviceRow };
+  listPending(limit?: number): PendingUserRow[];
+  setApprovalStatus(args: {
+    userId: Buffer;
+    status: ApprovalStatus;
+    decidedBy: Buffer;
+    reason?: string;
+  }): UserRow | null;
   createDevice(args: {
     userId: Buffer;
     pubkey: Buffer;
@@ -46,14 +66,20 @@ export interface UserRepo {
 }
 
 export function createUserRepo(db: Database): UserRepo {
+  const userCols =
+    "id, email_hash, opaque_record, kdf_params, created_at, updated_at, approval_status, approval_decided_at, approval_decided_by, rejection_reason";
   const stmtFindByEmail = db.prepare(
-    "SELECT id, email_hash, opaque_record, kdf_params, created_at, updated_at FROM users WHERE email_hash = ?",
+    `SELECT ${userCols} FROM users WHERE email_hash = ?`,
   );
-  const stmtFindById = db.prepare(
-    "SELECT id, email_hash, opaque_record, kdf_params, created_at, updated_at FROM users WHERE id = ?",
-  );
+  const stmtFindById = db.prepare(`SELECT ${userCols} FROM users WHERE id = ?`);
   const stmtInsertUser = db.prepare(
-    "INSERT INTO users (id, email_hash, opaque_record, kdf_params, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO users (id, email_hash, opaque_record, kdf_params, created_at, updated_at, approval_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  const stmtListPending = db.prepare(
+    "SELECT id, email_hash, created_at FROM users WHERE approval_status = 'pending' ORDER BY created_at ASC LIMIT ?",
+  );
+  const stmtSetApproval = db.prepare(
+    "UPDATE users SET approval_status = ?, approval_decided_at = ?, approval_decided_by = ?, rejection_reason = ?, updated_at = ? WHERE id = ?",
   );
   const stmtInsertDevice = db.prepare(
     "INSERT INTO devices (id, user_id, pubkey, label, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -76,6 +102,10 @@ export function createUserRepo(db: Database): UserRepo {
     kdfParams: r["kdf_params"] as string,
     createdAt: r["created_at"] as number,
     updatedAt: r["updated_at"] as number,
+    approvalStatus: (r["approval_status"] as ApprovalStatus) ?? "approved",
+    approvalDecidedAt: (r["approval_decided_at"] as number | null) ?? null,
+    approvalDecidedBy: (r["approval_decided_by"] as Buffer | null) ?? null,
+    rejectionReason: (r["rejection_reason"] as string | null) ?? null,
   });
   const mapDevice = (r: Record<string, unknown>): DeviceRow => ({
     id: r["id"] as Buffer,
@@ -95,12 +125,20 @@ export function createUserRepo(db: Database): UserRepo {
       const row = stmtFindById.get(id) as Record<string, unknown> | undefined;
       return row ? mapUser(row) : null;
     },
-    createUserAndDevice({ emailHash, opaqueRecord, kdfParams, devicePubkey, deviceLabel }) {
+    createUserAndDevice({
+      emailHash,
+      opaqueRecord,
+      kdfParams,
+      devicePubkey,
+      deviceLabel,
+      approvalStatus,
+    }) {
       const userId = newUuidV7();
       const deviceId = newUuidV7();
       const now = Date.now();
+      const status: ApprovalStatus = approvalStatus ?? "pending";
       const tx = db.transaction(() => {
-        stmtInsertUser.run(userId, emailHash, opaqueRecord, kdfParams, now, now);
+        stmtInsertUser.run(userId, emailHash, opaqueRecord, kdfParams, now, now, status);
         stmtInsertDevice.run(deviceId, userId, devicePubkey, deviceLabel, now, now);
       });
       tx();
@@ -112,6 +150,10 @@ export function createUserRepo(db: Database): UserRepo {
           kdfParams,
           createdAt: now,
           updatedAt: now,
+          approvalStatus: status,
+          approvalDecidedAt: null,
+          approvalDecidedBy: null,
+          rejectionReason: null,
         },
         device: {
           id: deviceId,
@@ -122,6 +164,28 @@ export function createUserRepo(db: Database): UserRepo {
           lastSeenAt: now,
         },
       };
+    },
+    listPending(limit = 100) {
+      const rows = stmtListPending.all(limit) as Record<string, unknown>[];
+      return rows.map((r) => ({
+        id: r["id"] as Buffer,
+        emailHash: r["email_hash"] as Buffer,
+        createdAt: r["created_at"] as number,
+      }));
+    },
+    setApprovalStatus({ userId, status, decidedBy, reason }) {
+      const now = Date.now();
+      const res = stmtSetApproval.run(
+        status,
+        now,
+        decidedBy,
+        reason ?? null,
+        now,
+        userId,
+      );
+      if (res.changes === 0) return null;
+      const row = stmtFindById.get(userId) as Record<string, unknown> | undefined;
+      return row ? mapUser(row) : null;
     },
     createDevice({ userId, pubkey, label }) {
       const id = newUuidV7();

@@ -58,7 +58,18 @@ async function registerAndLogin(
       devicePubkey: Array.from(randomBytes(32)),
     },
   });
-  return (finRes.json() as { sessionToken: string }).sessionToken;
+  const finBody = finRes.json() as { userId: string };
+  // Skip the admin workflow by approving directly in the DB.
+   
+  const db = (app as any).__store_db as import("better-sqlite3").Database;
+  db.prepare("UPDATE users SET approval_status = 'approved' WHERE id = ?").run(
+    Buffer.from(finBody.userId, "hex"),
+  );
+  const statusRes = await app.inject({
+    method: "GET",
+    url: `/auth/approval-status/${finBody.userId}`,
+  });
+  return (statusRes.json() as { sessionToken: string }).sessionToken;
 }
 
 async function pushEvent(

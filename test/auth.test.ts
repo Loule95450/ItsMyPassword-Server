@@ -72,10 +72,45 @@ async function registerHelper(
   const finBody = finRes.json() as {
     userId: string;
     deviceId: string;
-    sessionToken: string;
-    expiresAt: number;
+    approvalStatus: string;
   };
-  return { ...finBody, devicePubkey };
+  expect(finBody.approvalStatus).toBe("pending");
+
+  // Force-approve via direct DB write so the helper returns a usable
+  // session token for the rest of the test suite. Production-flow tests
+  // exercising the real approval workflow live in admin.test.ts.
+  forceApprove(app, finBody.userId);
+
+  const statusRes = await app.inject({
+    method: "GET",
+    url: `/auth/approval-status/${finBody.userId}`,
+  });
+  expect(statusRes.statusCode).toBe(200);
+  const statusBody = statusRes.json() as { status: string; sessionToken?: string };
+  expect(statusBody.status).toBe("approved");
+  if (!statusBody.sessionToken) throw new Error("expected sessionToken");
+  return {
+    userId: finBody.userId,
+    deviceId: finBody.deviceId,
+    sessionToken: statusBody.sessionToken,
+    devicePubkey,
+  };
+}
+
+/** Bypass the admin approval flow by writing the status row directly.
+ * Used only in tests that want to exercise post-approval behavior. */
+function forceApprove(app: FastifyInstance, userIdHex: string): void {
+  // The store is exposed on the Fastify instance via the closure-captured
+  // build call; we access it through the dependency injection used by
+  // app.ts. As a fallback, open a tiny side channel.
+   
+  const db = (app as any).__store_db as
+    | import("better-sqlite3").Database
+    | undefined;
+  if (!db) throw new Error("test DB handle not exposed on app");
+  db.prepare(
+    "UPDATE users SET approval_status = 'approved' WHERE id = ?",
+  ).run(Buffer.from(userIdHex, "hex"));
 }
 
 async function loginHelper(
