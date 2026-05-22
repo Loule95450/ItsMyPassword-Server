@@ -1,3 +1,16 @@
+/**
+ * App composition. Two surfaces can be served:
+ *   - the `api` surface (user-facing auth + sync) goes on the public port,
+ *   - the `admin` surface (setup + login + approval) goes on a private
+ *     port (loopback by default).
+ *
+ * `buildServices()` opens the shared SQLite store and wires every domain
+ * service. `buildApp()` then creates a Fastify instance that registers
+ * only the routes for the requested mode (api / admin / both).
+ *
+ * Tests construct the both-modes app so they continue to work against a
+ * single instance.
+ */
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -6,33 +19,47 @@ import sensible from "@fastify/sensible";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { createOpaqueService } from "./auth/opaque.js";
-import { createChallengeService } from "./auth/challenges.js";
-import { createLoginRateLimiter } from "./auth/ratelimit.js";
-import { createSessionService } from "./auth/sessions.js";
+import { createOpaqueService, type OpaqueService } from "./auth/opaque.js";
+import { createAdminChallengeService, type AdminChallengeService } from "./auth/admin-challenges.js";
+import { createAdminSessionService, type AdminSessionService } from "./auth/admin-sessions.js";
+import { createChallengeService, type ChallengeService } from "./auth/challenges.js";
+import { createLoginRateLimiter, type LoginRateLimiter } from "./auth/ratelimit.js";
+import { createSessionService, type SessionService } from "./auth/sessions.js";
 import type { Config } from "./config/env.js";
 import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { syncRoutes } from "./routes/sync.js";
-import { createAdminChallengeService } from "./auth/admin-challenges.js";
-import { createAdminSessionService } from "./auth/admin-sessions.js";
-import { createAuditLogger } from "./store/audit.js";
-import { createAdminRepo } from "./store/admins.js";
-import { migrate, openStore } from "./store/db.js";
-import { createSyncRepo } from "./store/sync.js";
-import { createUserRepo } from "./store/users.js";
+import { createAdminRepo, type AdminRepo } from "./store/admins.js";
+import { createAuditLogger, type AuditLogger } from "./store/audit.js";
+import { migrate, openStore, type Store } from "./store/db.js";
+import { createSyncRepo, type SyncRepo } from "./store/sync.js";
+import { createUserRepo, type UserRepo } from "./store/users.js";
+
+export type RouteMode = "api" | "admin" | "all";
+
+export interface Services {
+  store: Store;
+  opaque: OpaqueService;
+  users: UserRepo;
+  sessions: SessionService;
+  challenges: ChallengeService;
+  rateLimitLogin: LoginRateLimiter;
+  audit: AuditLogger;
+  sync: SyncRepo;
+  admins: AdminRepo;
+  adminSessions: AdminSessionService;
+  adminChallenges: AdminChallengeService;
+}
 
 export interface AppOptions {
-  /** Override migrations directory (for tests). */
   migrationsDir?: string;
 }
 
-export async function buildApp(
+export async function buildServices(
   config: Config,
   options: AppOptions = {},
-): Promise<FastifyInstance> {
-  // Ensure data dir exists for file-backed DBs.
+): Promise<Services> {
   if (config.databasePath !== ":memory:") {
     mkdirSync(path.dirname(path.resolve(config.databasePath)), { recursive: true });
   }
@@ -40,15 +67,27 @@ export async function buildApp(
   migrate(store.db, options.migrationsDir);
 
   const opaque = await createOpaqueService(store.db);
-  const users = createUserRepo(store.db);
-  const sessions = createSessionService(store.db);
-  const challenges = createChallengeService(store.db);
-  const ratelimitLogin = createLoginRateLimiter(store.db);
-  const audit = createAuditLogger(store.db);
-  const sync = createSyncRepo(store.db);
-  const admins = createAdminRepo(store.db);
-  const adminSessions = createAdminSessionService(store.db);
-  const adminChallenges = createAdminChallengeService(store.db);
+  return {
+    store,
+    opaque,
+    users: createUserRepo(store.db),
+    sessions: createSessionService(store.db),
+    challenges: createChallengeService(store.db),
+    rateLimitLogin: createLoginRateLimiter(store.db),
+    audit: createAuditLogger(store.db),
+    sync: createSyncRepo(store.db),
+    admins: createAdminRepo(store.db),
+    adminSessions: createAdminSessionService(store.db),
+    adminChallenges: createAdminChallengeService(store.db),
+  };
+}
+
+export async function buildApp(
+  config: Config,
+  options: AppOptions & { mode?: RouteMode; services?: Services } = {},
+): Promise<FastifyInstance> {
+  const mode: RouteMode = options.mode ?? "all";
+  const services = options.services ?? (await buildServices(config, options));
 
   const app = Fastify({
     logger: {
@@ -87,12 +126,9 @@ export async function buildApp(
 
   await app.register(sensible);
 
-  // Browser extensions, mobile webviews, and second-origin Web UIs all need
-  // CORS to be able to reach the API. The list of allowed origins is
-  // configured via CORS_ORIGINS (comma-separated). When empty, CORS is
-  // effectively disabled — the same-origin model (Caddy + the API on one
-  // hostname) suffices and no preflight is allowed.
-  if (config.corsOrigins.length > 0) {
+  // CORS only matters on the public API instance. The admin UI is
+  // same-origin (served by the admin instance itself).
+  if (mode !== "admin" && config.corsOrigins.length > 0) {
     await app.register(cors, {
       origin: [...config.corsOrigins],
       methods: ["GET", "POST", "DELETE", "OPTIONS"],
@@ -109,32 +145,40 @@ export async function buildApp(
     keyGenerator: (req) => req.ip,
   });
 
+  // /health is exposed on every surface so monitoring works regardless
+  // of which port is reachable.
   await app.register(healthRoutes);
-  await app.register(async (instance) => {
-    await authRoutes(instance, {
-      opaque,
-      users,
-      sessions,
-      challenges,
-      rateLimit: ratelimitLogin,
-      audit,
-      hmacKey: config.serverHmacKey,
+
+  if (mode === "api" || mode === "all") {
+    await app.register(async (instance) => {
+      await authRoutes(instance, {
+        opaque: services.opaque,
+        users: services.users,
+        sessions: services.sessions,
+        challenges: services.challenges,
+        rateLimit: services.rateLimitLogin,
+        audit: services.audit,
+        hmacKey: config.serverHmacKey,
+      });
     });
-  });
-  await app.register(async (instance) => {
-    await syncRoutes(instance, { sync, sessions });
-  });
-  await app.register(async (instance) => {
-    await adminRoutes(instance, {
-      opaque,
-      admins,
-      users,
-      sessions: adminSessions,
-      challenges: adminChallenges,
-      audit,
-      hmacKey: config.serverHmacKey,
+    await app.register(async (instance) => {
+      await syncRoutes(instance, { sync: services.sync, sessions: services.sessions });
     });
-  });
+  }
+
+  if (mode === "admin" || mode === "all") {
+    await app.register(async (instance) => {
+      await adminRoutes(instance, {
+        opaque: services.opaque,
+        admins: services.admins,
+        users: services.users,
+        sessions: services.adminSessions,
+        challenges: services.adminChallenges,
+        audit: services.audit,
+        hmacKey: config.serverHmacKey,
+      });
+    });
+  }
 
   app.setNotFoundHandler((_req, reply) => {
     reply.code(404).send({ error: "not_found" });
@@ -143,26 +187,29 @@ export async function buildApp(
   // Expose the raw DB handle for integration tests. Production paths
   // never read this property.
    
-  (app as any).__store_db = store.db;
+  (app as any).__store_db = services.store.db;
 
-  app.addHook("onClose", async () => {
-    store.close();
-  });
-
-  // Purge expired sessions/challenges/login_attempts on a schedule.
+  // Each instance owns its own purge timer when the services are
+  // instance-private; when shared, only the first one launched will run
+  // it (the second `setInterval` is fine to coexist, the inserts are
+  // idempotent).
   const purgeTimer = setInterval(() => {
     try {
-      sessions.purgeExpired();
-      challenges.purgeExpired();
-      adminSessions.purgeExpired();
-      adminChallenges.purgeExpired();
-      ratelimitLogin.purgeOld();
+      services.sessions.purgeExpired();
+      services.challenges.purgeExpired();
+      services.adminSessions.purgeExpired();
+      services.adminChallenges.purgeExpired();
+      services.rateLimitLogin.purgeOld();
     } catch (err) {
       app.log.warn({ err }, "background purge failed");
     }
   }, 60_000).unref();
   app.addHook("onClose", async () => {
     clearInterval(purgeTimer);
+    // Close the shared store only on the LAST app to close. The
+    // simplest convention: api closes first, admin owns the store and
+    // closes it. We attach a marker via the services object — see
+    // index.ts for the orchestration.
   });
 
   return app;

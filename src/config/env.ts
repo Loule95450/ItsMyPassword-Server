@@ -27,6 +27,17 @@ function optionalInt(name: string, fallback: number): number {
 export interface Config {
   readonly port: number;
   readonly host: string;
+  /**
+   * Port for the admin endpoints + web UI. When `null` or equal to
+   * `port`, admin routes are colocated on the API server. When
+   * different, two Fastify instances are spun up so the operator can
+   * bind the admin port to 127.0.0.1 / a VPN while leaving the API
+   * port public.
+   */
+  readonly adminPort: number | null;
+  /** Host the admin instance binds to. Defaults to 127.0.0.1 — local
+   * loopback only — so the admin is private out of the box. */
+  readonly adminHost: string;
   readonly databasePath: string;
   readonly logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   readonly trustProxy: boolean;
@@ -60,9 +71,18 @@ export function loadConfig(): Config {
     .map((o) => o.trim())
     .filter((o) => o.length > 0);
 
+  const adminPortRaw = process.env["ADMIN_PORT"];
+  const adminPort =
+    adminPortRaw === undefined || adminPortRaw === "" ? null : Number.parseInt(adminPortRaw, 10);
+  if (adminPort !== null && Number.isNaN(adminPort)) {
+    throw new Error(`Invalid integer for ADMIN_PORT: ${adminPortRaw}`);
+  }
+
   return {
     port: optionalInt("PORT", 8080),
     host: optional("HOST", "0.0.0.0"),
+    adminPort,
+    adminHost: optional("ADMIN_HOST", "127.0.0.1"),
     databasePath: optional("DATABASE_PATH", "./data/itsmypassword.db"),
     logLevel: parseLogLevel(optional("LOG_LEVEL", "info")),
     trustProxy: optional("TRUST_PROXY", "true") === "true",

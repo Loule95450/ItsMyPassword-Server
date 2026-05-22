@@ -30,7 +30,7 @@ COPY --chown=nonroot:nonroot migrations ./migrations
 COPY --from=build --chown=nonroot:nonroot /opt/data-skeleton /data
 
 USER nonroot
-EXPOSE 8080
+EXPOSE 8080 8081
 VOLUME ["/data"]
 
 CMD ["dist/index.js"]

@@ -11,13 +11,18 @@ services:
     image: ghcr.io/itsmypassword/server:latest
     container_name: itsmypassword
     restart: unless-stopped
-    # Bind to host 0.0.0.0:${HOST_PORT:-8080}. Change HOST_PORT in .env or
-    # in the Portainer/Synology environment screen if 8080 is taken.
+    # Public API port. Safe to expose behind your reverse proxy.
+    # The admin port (8081 inside the container) is bound to 127.0.0.1
+    # on the host so it never leaves your machine without an explicit
+    # SSH tunnel or a separate proxy line.
     ports:
       - "${HOST_PORT:-8080}:8080"
+      - "127.0.0.1:${ADMIN_HOST_PORT:-8081}:8081"
     environment:
       HOST: 0.0.0.0
       PORT: 8080
+      ADMIN_PORT: 8081
+      ADMIN_HOST: 0.0.0.0
       DATABASE_PATH: /data/itsmypassword.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: ${TRUST_PROXY:-true}
@@ -26,7 +31,9 @@ services:
     volumes:
       - data:/data
     # Distroless has no shell; we check liveness with a tiny exec via the
-    # bundled node binary.
+    # bundled node binary. Probing the public API port is enough — the
+    # admin instance shares its services and would not survive a DB
+    # outage either.
     healthcheck:
       test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
