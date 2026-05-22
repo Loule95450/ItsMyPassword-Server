@@ -12,8 +12,10 @@ import { createSessionService } from "./auth/sessions.js";
 import type { Config } from "./config/env.js";
 import { authRoutes } from "./routes/auth.js";
 import { healthRoutes } from "./routes/health.js";
+import { syncRoutes } from "./routes/sync.js";
 import { createAuditLogger } from "./store/audit.js";
 import { migrate, openStore } from "./store/db.js";
+import { createSyncRepo } from "./store/sync.js";
 import { createUserRepo } from "./store/users.js";
 
 export interface AppOptions {
@@ -38,6 +40,7 @@ export async function buildApp(
   const challenges = createChallengeService(store.db);
   const ratelimitLogin = createLoginRateLimiter(store.db);
   const audit = createAuditLogger(store.db);
+  const sync = createSyncRepo(store.db);
 
   const app = Fastify({
     logger: {
@@ -94,6 +97,9 @@ export async function buildApp(
       audit,
       hmacKey: config.serverHmacKey,
     });
+  });
+  await app.register(async (instance) => {
+    await syncRoutes(instance, { sync, sessions });
   });
 
   app.setNotFoundHandler((_req, reply) => {
