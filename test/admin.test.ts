@@ -322,4 +322,118 @@ describe("admin + approval workflow", () => {
       expect((finRes.json() as { error: string }).error).toBe("pending_approval");
     });
   });
+
+  describe("admin user management endpoints", () => {
+    let token: string;
+
+    beforeEach(async () => {
+      await setupAdmin(app, "root", "pw-1");
+      token = await adminLogin(app, "root", "pw-1");
+    });
+
+    it("GET /admin/users with no filter lists everyone with a total", async () => {
+      await userRegister(app, "alice@example.com", "pw-a");
+      await userRegister(app, "bob@example.com", "pw-b");
+      const r = await app.inject({
+        method: "GET",
+        url: "/admin/users",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(r.statusCode).toBe(200);
+      const body = r.json() as { total: number; users: { status: string }[] };
+      expect(body.total).toBe(2);
+      expect(body.users).toHaveLength(2);
+      expect(body.users.every((u) => u.status === "pending")).toBe(true);
+    });
+
+    it("GET /admin/users?status=approved excludes pending", async () => {
+      const { userId } = await userRegister(app, "alice@example.com", "pw-a");
+      await userRegister(app, "bob@example.com", "pw-b");
+      // approve alice
+      const apr = await app.inject({
+        method: "POST",
+        url: `/admin/users/${userId}/approve`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(apr.statusCode).toBe(200);
+      const r = await app.inject({
+        method: "GET",
+        url: "/admin/users?status=approved",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const body = r.json() as { total: number; users: { id: string; status: string }[] };
+      expect(body.total).toBe(1);
+      expect(body.users[0]!.id).toBe(userId);
+      expect(body.users[0]!.status).toBe("approved");
+    });
+
+    it("revoke flips an approved user back to rejected", async () => {
+      const { userId } = await userRegister(app, "alice@example.com", "pw-a");
+      await app.inject({
+        method: "POST",
+        url: `/admin/users/${userId}/approve`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const r = await app.inject({
+        method: "POST",
+        url: `/admin/users/${userId}/revoke`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { reason: "ne devrait pas être là" },
+      });
+      expect(r.statusCode).toBe(200);
+      const after = await app.inject({
+        method: "GET",
+        url: "/admin/users?status=rejected",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const body = after.json() as { users: { id: string; rejectionReason?: string }[] };
+      expect(body.users).toHaveLength(1);
+      expect(body.users[0]!.rejectionReason).toBe("ne devrait pas être là");
+    });
+
+    it("DELETE /admin/users/:id removes the user", async () => {
+      const { userId } = await userRegister(app, "alice@example.com", "pw-a");
+      const r = await app.inject({
+        method: "DELETE",
+        url: `/admin/users/${userId}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(r.statusCode).toBe(200);
+      const after = await app.inject({
+        method: "GET",
+        url: "/admin/users?status=all",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const body = after.json() as { total: number };
+      expect(body.total).toBe(0);
+    });
+
+    it("DELETE /admin/users/:id returns 404 for an unknown id", async () => {
+      const fakeId = randomBytes(16).toString("hex");
+      const r = await app.inject({
+        method: "DELETE",
+        url: `/admin/users/${fakeId}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(r.statusCode).toBe(404);
+    });
+
+    it("rejects all user-mgmt endpoints without an admin Bearer", async () => {
+      const listing = await app.inject({ method: "GET", url: "/admin/users" });
+      expect(listing.statusCode).toBe(401);
+      // POST routes still need a valid body before auth runs; we send one
+      // to isolate the auth check (400 != 401 would mean schema rejected).
+      const revoke = await app.inject({
+        method: "POST",
+        url: "/admin/users/00000000000000000000000000000000/revoke",
+        payload: {},
+      });
+      expect(revoke.statusCode).toBe(401);
+      const del = await app.inject({
+        method: "DELETE",
+        url: "/admin/users/00000000000000000000000000000000",
+      });
+      expect(del.statusCode).toBe(401);
+    });
+  });
 });

@@ -1,14 +1,12 @@
 /**
- * Admin web UI — single-page controller.
+ * Admin web UI — single-page controller. Now ships:
+ *   - the original setup / login / dashboard branching,
+ *   - a 4-tab filter (pending / approved / rejected / all),
+ *   - revoke (back to rejected) + irreversible delete actions with
+ *     a confirmation modal that asks for an optional reason.
  *
- * Decides which view to show based on:
- *   GET /admin/state    → does an admin exist yet?
- *   GET /admin/me       → is this browser already logged in?
- *
- * Then drives the OPAQUE flow against the corresponding endpoints. The
- * session token is held in localStorage under SESSION_KEY; the master
- * password is never persisted anywhere (the browser forgets it as soon
- * as the form submit handler returns).
+ * Styles come from a Tailwind v4 build (admin.css) that mirrors the
+ * website's design tokens.
  */
 import {
   KE2,
@@ -22,12 +20,28 @@ const SERVER_IDENTITY = "itsmypassword-server";
 const SESSION_KEY = "impw.admin.session.v1";
 const opaqueConfig = getOpaqueConfig(OpaqueID.OPAQUE_P256);
 
+type Filter = "pending" | "approved" | "rejected" | "all";
+type UserStatus = "pending" | "approved" | "rejected";
+
+interface UserRow {
+  id: string;
+  emailHashHex: string;
+  status: UserStatus;
+  createdAt: number;
+  decidedAt: number | null;
+  lastSeenAt: number | null;
+  rejectionReason?: string;
+}
+
 // --- tiny DOM helpers -------------------------------------------------
 
 function $<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`missing element #${id}`);
   return el as T;
+}
+function $$(sel: string): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(sel));
 }
 function show(id: string): void {
   $(id).hidden = false;
@@ -59,7 +73,7 @@ async function api<T>(path: string, opts: FetchOpts = {}): Promise<T> {
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.auth) {
     const token = localStorage.getItem(SESSION_KEY);
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (token !== null) headers["Authorization"] = `Bearer ${token}`;
   }
   const init: RequestInit = { method: opts.method ?? "GET", headers };
   if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
@@ -70,7 +84,7 @@ async function api<T>(path: string, opts: FetchOpts = {}): Promise<T> {
   try {
     parsed = JSON.parse(text);
   } catch {
-    /* not JSON */
+    /* keep as text */
   }
   if (!res.ok) {
     const err = parsed as { error?: string } | undefined;
@@ -135,7 +149,7 @@ async function opaqueLogin(
   );
 }
 
-// --- Views ------------------------------------------------------------
+// --- View routing -----------------------------------------------------
 
 type View = "loading" | "setup" | "login" | "dashboard";
 
@@ -146,6 +160,8 @@ function switchView(view: View): void {
   }
 }
 
+let currentFilter: Filter = "pending";
+
 async function decideStartView(): Promise<void> {
   switchView("loading");
   const state = await api<{ adminExists: boolean }>("/admin/state");
@@ -154,7 +170,7 @@ async function decideStartView(): Promise<void> {
     return;
   }
   const token = localStorage.getItem(SESSION_KEY);
-  if (!token) {
+  if (token === null) {
     switchView("login");
     return;
   }
@@ -163,7 +179,7 @@ async function decideStartView(): Promise<void> {
     setText("who", `connecté en tant que ${me.username}`);
     $("logout-btn").hidden = false;
     switchView("dashboard");
-    await loadPending();
+    await loadUsers();
   } catch {
     localStorage.removeItem(SESSION_KEY);
     switchView("login");
@@ -239,79 +255,242 @@ function wireLogin(): void {
 
 // --- Dashboard --------------------------------------------------------
 
-interface PendingUser {
-  id: string;
-  emailHashHex: string;
-  createdAt: number;
+async function refreshCounts(): Promise<void> {
+  // Cheap: 4 calls in parallel, the user can wait <1 s on a sane DB.
+  const [pending, approved, rejected, all] = await Promise.all([
+    api<{ total: number }>("/admin/users?status=pending&limit=1", { auth: true }),
+    api<{ total: number }>("/admin/users?status=approved&limit=1", { auth: true }),
+    api<{ total: number }>("/admin/users?status=rejected&limit=1", { auth: true }),
+    api<{ total: number }>("/admin/users?status=all&limit=1", { auth: true }),
+  ]);
+  const counts: Record<Filter, number> = {
+    pending: pending.total,
+    approved: approved.total,
+    rejected: rejected.total,
+    all: all.total,
+  };
+  for (const tab of $$(".tab")) {
+    const f = (tab.dataset["filter"] ?? "all") as Filter;
+    const pill = tab.querySelector<HTMLElement>(`[data-count="${f}"]`);
+    if (pill !== null) pill.textContent = String(counts[f]);
+  }
 }
 
-async function loadPending(): Promise<void> {
-  const list = $("pending-list");
-  list.innerHTML = "<li class='muted center'>Chargement…</li>";
+async function loadUsers(): Promise<void> {
+  const list = $("users-list");
+  list.innerHTML = `<li class="p-6 text-(--color-ink-3) text-sm">Chargement…</li>`;
   try {
-    const data = await api<{ users: PendingUser[] }>(
-      "/admin/users/pending",
-      { auth: true },
-    );
-    renderPending(data.users);
+    const [data] = await Promise.all([
+      api<{ users: UserRow[]; total: number }>(
+        `/admin/users?status=${encodeURIComponent(currentFilter)}&limit=200`,
+        { auth: true },
+      ),
+      refreshCounts(),
+    ]);
+    renderUsers(data.users);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    list.innerHTML = `<li class='error'>Erreur de chargement : ${escapeHtml(message)}</li>`;
+    list.innerHTML = `<li class="callout callout-danger m-4">Erreur de chargement : ${escapeHtml(message)}</li>`;
   }
 }
 
-function renderPending(users: PendingUser[]): void {
-  const list = $("pending-list");
-  setText("pending-count", String(users.length));
+function statusPill(status: UserStatus): string {
+  if (status === "approved")
+    return `<span class="pill pill-success">Approuvé</span>`;
+  if (status === "rejected")
+    return `<span class="pill pill-danger">Refusé</span>`;
+  return `<span class="pill pill-warn">En attente</span>`;
+}
+
+function actionButtons(u: UserRow): string {
+  const id = escapeHtml(u.id);
+  if (u.status === "pending") {
+    return `
+      <button data-act="reject" data-id="${id}" class="btn-ghost btn-sm">Refuser</button>
+      <button data-act="approve" data-id="${id}" class="btn-success btn-sm">Approuver</button>
+    `;
+  }
+  if (u.status === "approved") {
+    return `
+      <button data-act="delete" data-id="${id}" class="btn-ghost btn-sm">Supprimer…</button>
+      <button data-act="revoke" data-id="${id}" class="btn-danger btn-sm">Révoquer</button>
+    `;
+  }
+  // rejected
+  return `
+    <button data-act="delete" data-id="${id}" class="btn-ghost btn-sm">Supprimer…</button>
+    <button data-act="approve" data-id="${id}" class="btn-success btn-sm">Approuver</button>
+  `;
+}
+
+function renderUsers(users: UserRow[]): void {
+  const list = $("users-list");
   if (users.length === 0) {
-    list.innerHTML =
-      "<li class='muted center' style='padding:24px;'>Aucune demande en attente. Quand un utilisateur tente de se connecter, il apparaîtra ici.</li>";
+    list.innerHTML = `<li class="p-6 text-(--color-ink-3) text-sm text-center">Aucun utilisateur dans cette catégorie.</li>`;
     return;
   }
-  list.innerHTML = "";
-  for (const u of users) {
-    const li = document.createElement("li");
-    li.className = "entry";
-    const fmtDate = new Date(u.createdAt).toLocaleString("fr-FR");
-    li.innerHTML = `
-      <div class="meta">
-        <strong>Utilisateur ${escapeHtml(u.id.slice(0, 8))}…</strong>
-        <span class="id">empreinte email : ${escapeHtml(u.emailHashHex)}</span>
-        <span class="age">demandé le ${escapeHtml(fmtDate)}</span>
-      </div>
-      <div class="row-actions">
-        <button data-act="reject" data-id="${escapeHtml(u.id)}" class="btn-ghost">Refuser</button>
-        <button data-act="approve" data-id="${escapeHtml(u.id)}" class="btn-success">Approuver</button>
-      </div>
-    `;
-    list.appendChild(li);
-  }
+  list.innerHTML = users
+    .map((u) => {
+      const created = new Date(u.createdAt).toLocaleString("fr-FR");
+      const decided =
+        u.decidedAt !== null ? new Date(u.decidedAt).toLocaleString("fr-FR") : null;
+      const last =
+        u.lastSeenAt !== null ? new Date(u.lastSeenAt).toLocaleString("fr-FR") : null;
+      return `
+        <li class="row-entry m-4">
+          <div class="flex flex-col gap-1.5 min-w-0">
+            <div class="flex items-center gap-2.5 flex-wrap">
+              ${statusPill(u.status)}
+              <code class="font-mono text-xs text-(--color-ink-3) break-all">${escapeHtml(u.emailHashHex)}</code>
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-(--color-ink-3)">
+              <span>Demandé : ${escapeHtml(created)}</span>
+              ${decided !== null ? `<span>Décidé : ${escapeHtml(decided)}</span>` : ""}
+              ${last !== null ? `<span>Vu : ${escapeHtml(last)}</span>` : ""}
+              ${u.rejectionReason !== undefined ? `<span>Raison : ${escapeHtml(u.rejectionReason)}</span>` : ""}
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            ${actionButtons(u)}
+          </div>
+        </li>
+      `;
+    })
+    .join("");
 }
+
+// --- Confirmation modal ----------------------------------------------
+
+interface ConfirmOpts {
+  title: string;
+  body: string;
+  okLabel: string;
+  okClass: "btn-danger" | "btn-success";
+  withReason: boolean;
+}
+
+async function confirm(opts: ConfirmOpts): Promise<string | null> {
+  return new Promise((resolve) => {
+    setText("confirm-title", opts.title);
+    setText("confirm-body", opts.body);
+    $("confirm-reason-wrap").hidden = !opts.withReason;
+    const reasonInput = $("confirm-reason") as HTMLInputElement;
+    reasonInput.value = "";
+    const ok = $<HTMLButtonElement>("confirm-ok");
+    ok.textContent = opts.okLabel;
+    ok.className = `${opts.okClass} btn-sm`;
+    show("confirm-overlay");
+
+    const cancel = $<HTMLButtonElement>("confirm-cancel");
+    const cleanup = (): void => {
+      hide("confirm-overlay");
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+    };
+    const onOk = (): void => {
+      const reason = opts.withReason ? reasonInput.value.trim() : "";
+      cleanup();
+      resolve(opts.withReason ? reason : "");
+    };
+    const onCancel = (): void => {
+      cleanup();
+      resolve(null);
+    };
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+  });
+}
+
+// --- Actions ----------------------------------------------------------
 
 async function approve(id: string): Promise<void> {
   await api(`/admin/users/${id}/approve`, { method: "POST", auth: true });
 }
 async function reject(id: string): Promise<void> {
-  const reason = window.prompt("Raison (facultatif) :", "")?.trim() ?? "";
+  const reason = await confirm({
+    title: "Refuser cette demande ?",
+    body: "L'utilisateur verra l'éventuelle raison sur sa page de connexion.",
+    okLabel: "Refuser",
+    okClass: "btn-danger",
+    withReason: true,
+  });
+  if (reason === null) return;
   await api(`/admin/users/${id}/reject`, {
     method: "POST",
     auth: true,
     body: reason.length > 0 ? { reason } : {},
   });
 }
+async function revoke(id: string): Promise<void> {
+  const reason = await confirm({
+    title: "Révoquer cet utilisateur approuvé ?",
+    body: "Il sera repassé en 'rejected', toutes ses sessions sont invalidées. Tu peux le réapprouver plus tard.",
+    okLabel: "Révoquer",
+    okClass: "btn-danger",
+    withReason: true,
+  });
+  if (reason === null) return;
+  await api(`/admin/users/${id}/revoke`, {
+    method: "POST",
+    auth: true,
+    body: reason.length > 0 ? { reason } : {},
+  });
+}
+async function destroy(id: string): Promise<void> {
+  const r = await confirm({
+    title: "Supprimer définitivement ce compte ?",
+    body: "Cette action efface l'utilisateur, ses appareils, sessions, événements et snapshots. Irréversible.",
+    okLabel: "Supprimer",
+    okClass: "btn-danger",
+    withReason: false,
+  });
+  if (r === null) return;
+  await api(`/admin/users/${id}`, { method: "DELETE", auth: true });
+}
 
 function wireDashboard(): void {
-  $("refresh-btn").addEventListener("click", () => void loadPending());
-  $("pending-list").addEventListener("click", (e) => {
+  $("refresh-btn").addEventListener("click", () => void loadUsers());
+
+  // tab switcher
+  for (const tab of $$(".tab")) {
+    tab.addEventListener("click", () => {
+      const f = (tab.dataset["filter"] ?? "pending") as Filter;
+      currentFilter = f;
+      for (const t of $$(".tab")) {
+        t.setAttribute("aria-pressed", t.dataset["filter"] === f ? "true" : "false");
+      }
+      void loadUsers();
+    });
+  }
+
+  // action dispatch
+  $("users-list").addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     if (!(target instanceof HTMLButtonElement)) return;
     const act = target.dataset["act"];
     const id = target.dataset["id"];
-    if (!act || !id) return;
+    if (act === undefined || id === undefined) return;
     target.disabled = true;
-    const action = act === "approve" ? approve(id) : reject(id);
+    let action: Promise<void>;
+    switch (act) {
+      case "approve":
+        action = approve(id);
+        break;
+      case "reject":
+        action = reject(id);
+        break;
+      case "revoke":
+        action = revoke(id);
+        break;
+      case "delete":
+        action = destroy(id);
+        break;
+      default:
+        target.disabled = false;
+        return;
+    }
     void action
-      .then(() => loadPending())
+      .then(() => loadUsers())
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         window.alert(`Échec : ${message}`);
@@ -352,16 +531,17 @@ function wireThemeToggle(): void {
 
 function humanError(message: string): string {
   if (message === "invalid_login") return "Identifiants refusés.";
-  if (message === "setup_locked") return "Le setup admin est déjà verrouillé : un compte existe.";
-  if (message.includes("HTTP 429")) return "Trop de tentatives. Patiente quelques minutes.";
+  if (message === "setup_locked")
+    return "Le setup admin est déjà verrouillé : un compte existe.";
+  if (message.includes("HTTP 429"))
+    return "Trop de tentatives. Patiente quelques minutes.";
   return message;
 }
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
     return (
-      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ??
-      c
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c
     );
   });
 }

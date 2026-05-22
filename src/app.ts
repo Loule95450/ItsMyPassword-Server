@@ -174,6 +174,7 @@ export async function buildApp(
         admins: services.admins,
         users: services.users,
         sessions: services.adminSessions,
+        userSessions: services.sessions,
         challenges: services.adminChallenges,
         audit: services.audit,
         hmacKey: config.serverHmacKey,

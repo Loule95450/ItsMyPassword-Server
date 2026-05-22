@@ -17,7 +17,8 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { OpaqueService } from "../auth/opaque.js";
 import type { AdminChallengeService } from "../auth/admin-challenges.js";
 import type { AdminSessionService } from "../auth/admin-sessions.js";
-import type { UserRepo } from "../store/users.js";
+import type { UserListFilter, UserRepo } from "../store/users.js";
+import type { SessionService } from "../auth/sessions.js";
 import type { AdminRepo } from "../store/admins.js";
 import type { AuditLogger } from "../store/audit.js";
 import { hmacIp } from "../crypto/hmac.js";
@@ -27,6 +28,9 @@ export interface AdminDeps {
   admins: AdminRepo;
   users: UserRepo;
   sessions: AdminSessionService;
+  /** User-side sessions, threaded in so revoking an approved user can
+   * also revoke their existing bearer tokens. */
+  userSessions: SessionService;
   challenges: AdminChallengeService;
   audit: AuditLogger;
   hmacKey: Buffer;
@@ -357,11 +361,144 @@ export async function adminRoutes(app: FastifyInstance, deps: AdminDeps): Promis
         ...(req.body?.reason !== undefined ? { reason: req.body.reason } : {}),
       });
       if (!updated) return reply.code(404).send({ error: "user_not_found" });
+      // Revoke any session this user may have already created (defense
+      // in depth: pending users normally have no session, but admins can
+      // reject an already-approved user).
+      deps.userSessions.revokeAllForUser(userId);
       deps.audit.log({
         userId,
         action: "register",
         ipHash: hmacIp(req.ip, deps.hmacKey),
         metadata: { actor: "admin", action: "reject" },
+      });
+      return reply.send({ ok: true });
+    },
+  );
+
+  // --- GET /admin/users -----------------------------------------------------
+  // Lists every user (or filtered by status) with last-device-activity
+  // join. Returns only metadata the admin can act on; never the OPAQUE
+  // record or the email itself.
+  app.get<{
+    Querystring: { status?: string; limit?: string; offset?: string };
+  }>(
+    "/admin/users",
+    {
+      preHandler: requireAuth,
+      schema: {
+        querystring: cast({
+          type: "object",
+          properties: {
+            status: { type: "string", enum: ["all", "pending", "approved", "rejected"] },
+            limit: { type: "string", pattern: "^[0-9]+$" },
+            offset: { type: "string", pattern: "^[0-9]+$" },
+          },
+          additionalProperties: false,
+        }),
+      },
+    },
+    async (req, reply) => {
+      const filter = (req.query.status ?? "all") as UserListFilter;
+      const limit = Math.min(
+        500,
+        req.query.limit !== undefined ? Number.parseInt(req.query.limit, 10) : 100,
+      );
+      const offset =
+        req.query.offset !== undefined ? Number.parseInt(req.query.offset, 10) : 0;
+      const rows = deps.users.listUsers(filter, limit, offset);
+      const total = deps.users.countUsers(filter);
+      return reply.send({
+        total,
+        users: rows.map((u) => ({
+          id: u.id.toString("hex"),
+          // 8 bytes (16 hex chars) of email_hash so the admin can
+          // visually disambiguate users without correlating across
+          // servers. Same prefix length as the pending list.
+          emailHashHex: u.emailHash.toString("hex").slice(0, 16),
+          status: u.approvalStatus,
+          createdAt: u.createdAt,
+          decidedAt: u.approvalDecidedAt,
+          lastSeenAt: u.lastSeenAt,
+          ...(u.rejectionReason !== null ? { rejectionReason: u.rejectionReason } : {}),
+        })),
+      });
+    },
+  );
+
+  // --- POST /admin/users/:id/revoke ----------------------------------------
+  // Move an approved user back to 'rejected' and invalidate every
+  // outstanding session. Approved-but-no-longer-trusted users hit a 401
+  // on their next sync poll. The admin can re-approve at any time.
+  app.post<{
+    Params: { id: string };
+    Body: { reason?: string };
+  }>(
+    "/admin/users/:id/revoke",
+    {
+      preHandler: requireAuth,
+      schema: {
+        params: cast({
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", pattern: "^[0-9a-f]{32}$" } },
+          additionalProperties: false,
+        }),
+        body: cast({
+          type: "object",
+          properties: { reason: { type: "string", maxLength: 256 } },
+          additionalProperties: false,
+        }),
+      },
+    },
+    async (req, reply) => {
+      const userId = Buffer.from(req.params.id, "hex");
+      const updated = deps.users.setApprovalStatus({
+        userId,
+        status: "rejected",
+        decidedBy: req.admin!.adminId,
+        ...(req.body?.reason !== undefined ? { reason: req.body.reason } : {}),
+      });
+      if (!updated) return reply.code(404).send({ error: "user_not_found" });
+      deps.userSessions.revokeAllForUser(userId);
+      deps.audit.log({
+        userId,
+        action: "device_revoke",
+        ipHash: hmacIp(req.ip, deps.hmacKey),
+        metadata: { actor: "admin", action: "revoke" },
+      });
+      return reply.send({ ok: true });
+    },
+  );
+
+  // --- DELETE /admin/users/:id ---------------------------------------------
+  // Irreversible: drops the user row. Cascades through FK to devices,
+  // sessions, events, snapshots, login_attempts, and audit_log (the
+  // audit row's user_id becomes NULL but the row stays for forensics).
+  app.delete<{ Params: { id: string } }>(
+    "/admin/users/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        params: cast({
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", pattern: "^[0-9a-f]{32}$" } },
+          additionalProperties: false,
+        }),
+      },
+    },
+    async (req, reply) => {
+      const userId = Buffer.from(req.params.id, "hex");
+      const ok = deps.users.deleteUser(userId);
+      if (!ok) return reply.code(404).send({ error: "user_not_found" });
+      deps.audit.log({
+        userId: null,
+        action: "account_delete",
+        ipHash: hmacIp(req.ip, deps.hmacKey),
+        metadata: {
+          actor: "admin",
+          deleted_user: userId.toString("hex"),
+        },
       });
       return reply.send({ ok: true });
     },

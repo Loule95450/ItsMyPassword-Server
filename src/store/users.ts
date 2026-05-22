@@ -27,6 +27,18 @@ export interface PendingUserRow {
   createdAt: number;
 }
 
+export interface UserListEntry {
+  id: Buffer;
+  emailHash: Buffer;
+  createdAt: number;
+  approvalStatus: ApprovalStatus;
+  approvalDecidedAt: number | null;
+  rejectionReason: string | null;
+  lastSeenAt: number | null;
+}
+
+export type UserListFilter = "all" | ApprovalStatus;
+
 export interface DeviceRow {
   id: Buffer;
   userId: Buffer;
@@ -48,6 +60,8 @@ export interface UserRepo {
     approvalStatus?: ApprovalStatus;
   }): { user: UserRow; device: DeviceRow };
   listPending(limit?: number): PendingUserRow[];
+  listUsers(filter: UserListFilter, limit?: number, offset?: number): UserListEntry[];
+  countUsers(filter: UserListFilter): number;
   setApprovalStatus(args: {
     userId: Buffer;
     status: ApprovalStatus;
@@ -77,6 +91,21 @@ export function createUserRepo(db: Database): UserRepo {
   );
   const stmtListPending = db.prepare(
     "SELECT id, email_hash, created_at FROM users WHERE approval_status = 'pending' ORDER BY created_at ASC LIMIT ?",
+  );
+  // listUsers joins on devices to get the last activity per user. The
+  // GROUP BY keeps one row per user; MAX(...) collapses the multi-device
+  // case to the most recent.
+  const userListCols =
+    "u.id, u.email_hash, u.created_at, u.approval_status, u.approval_decided_at, u.rejection_reason, MAX(d.last_seen_at) AS last_seen_at";
+  const stmtListAll = db.prepare(
+    `SELECT ${userListCols} FROM users u LEFT JOIN devices d ON d.user_id = u.id GROUP BY u.id ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
+  );
+  const stmtListFiltered = db.prepare(
+    `SELECT ${userListCols} FROM users u LEFT JOIN devices d ON d.user_id = u.id WHERE u.approval_status = ? GROUP BY u.id ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
+  );
+  const stmtCountAll = db.prepare("SELECT COUNT(*) AS n FROM users");
+  const stmtCountFiltered = db.prepare(
+    "SELECT COUNT(*) AS n FROM users WHERE approval_status = ?",
   );
   const stmtSetApproval = db.prepare(
     "UPDATE users SET approval_status = ?, approval_decided_at = ?, approval_decided_by = ?, rejection_reason = ?, updated_at = ? WHERE id = ?",
@@ -172,6 +201,30 @@ export function createUserRepo(db: Database): UserRepo {
         emailHash: r["email_hash"] as Buffer,
         createdAt: r["created_at"] as number,
       }));
+    },
+    listUsers(filter, limit = 100, offset = 0) {
+      const rows =
+        filter === "all"
+          ? (stmtListAll.all(limit, offset) as Record<string, unknown>[])
+          : (stmtListFiltered.all(filter, limit, offset) as Record<string, unknown>[]);
+      return rows.map(
+        (r): UserListEntry => ({
+          id: r["id"] as Buffer,
+          emailHash: r["email_hash"] as Buffer,
+          createdAt: r["created_at"] as number,
+          approvalStatus: r["approval_status"] as ApprovalStatus,
+          approvalDecidedAt: (r["approval_decided_at"] as number | null) ?? null,
+          rejectionReason: (r["rejection_reason"] as string | null) ?? null,
+          lastSeenAt: (r["last_seen_at"] as number | null) ?? null,
+        }),
+      );
+    },
+    countUsers(filter) {
+      const row =
+        filter === "all"
+          ? (stmtCountAll.get() as { n: number })
+          : (stmtCountFiltered.get(filter) as { n: number });
+      return row.n;
     },
     setApprovalStatus({ userId, status, decidedBy, reason }) {
       const now = Date.now();
