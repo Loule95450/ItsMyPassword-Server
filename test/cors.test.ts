@@ -15,6 +15,8 @@ const testConfig = (overrides: Partial<Config> = {}): Config => ({
   databasePath: ":memory:",
   logLevel: "fatal",
   trustProxy: false,
+  adminPort: null,
+  adminHost: "127.0.0.1",
   corsOrigins: [],
   serverHmacKey: Buffer.alloc(32, 1),
   ...overrides,
