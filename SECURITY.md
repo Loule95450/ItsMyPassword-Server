@@ -30,9 +30,10 @@ Out of scope:
 - third-party dependencies' upstream issues (please report to them; we
   track CVEs via `npm audit` and Trivy in CI).
 
-## Threat model — summary
+## Threat model
 
-The full threat model lands in milestone M6. In short, we assume:
+The full threat model is in [docs/threat-model.md](./docs/threat-model.md).
+In short, we assume:
 
 - The network is hostile (TLS via Caddy + Let's Encrypt is mandatory).
 - The server operator may be honest-but-curious, or fully compromised.

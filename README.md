@@ -116,15 +116,19 @@ curl http://localhost:8080/health
 # {"status":"ok"}
 ```
 
-## Backups
+## Backups, upgrades, troubleshooting
 
-`/data/itsmypassword.db` is the entire server state. Snapshot the Docker
-volume nightly. Litestream support and runbook land in M6.
+See the self-hosting runbook: [docs/self-host.md](./docs/self-host.md).
+TL;DR for backups: stop the stack, tar the `data` volume, restart. Keep
+`SERVER_HMAC_KEY` backed up *separately* — without it the database is
+unusable.
 
 ## Security
 
-If you discover a security issue, please **do not** open a public issue.
-See [SECURITY.md](./SECURITY.md). The full threat model lands in M6.
+If you discover a security issue, please **do not** open a public issue;
+see [SECURITY.md](./SECURITY.md). The full threat model is in
+[docs/threat-model.md](./docs/threat-model.md) and the wire protocol is
+fully documented in [docs/protocol.md](./docs/protocol.md).
 
 ## Development
 
