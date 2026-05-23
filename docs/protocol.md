@@ -1,7 +1,7 @@
 # Protocol — wire format and flows
 
 This document is the canonical reference for what passes between the
-ItsMyPassword extension (and future mobile clients) and a self-hosted
+Keyfount extension (and future mobile clients) and a self-hosted
 sync server. Anything that disagrees with this file is a bug in the
 implementation, not in the doc.
 

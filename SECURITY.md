@@ -4,7 +4,7 @@
 
 Please **do not** open a public issue for security-sensitive reports.
 
-Email the maintainers at `security@itsmypassword.invalid` (replace with the
+Email the maintainers at `security@keyfount.invalid` (replace with the
 real address once published) with:
 
 - a description of the issue,

@@ -1,4 +1,4 @@
-# ItsMyPassword sync server — drop-in stack for Portainer, Synology
+# Keyfount sync server — drop-in stack for Portainer, Synology
 # Container Manager, Unraid, or plain `docker compose up -d`.
 #
 # Use this file when you already have a reverse proxy in front (Synology
@@ -8,8 +8,8 @@
 
 services:
   app:
-    image: ghcr.io/itsmypassword/server:latest
-    container_name: itsmypassword
+    image: ghcr.io/keyfount/server:latest
+    container_name: keyfount
     restart: unless-stopped
     # Public API port. Safe to expose behind your reverse proxy.
     # The admin port (8081 inside the container) is bound to 127.0.0.1
@@ -23,7 +23,7 @@ services:
       PORT: 8080
       ADMIN_PORT: 8081
       ADMIN_HOST: 0.0.0.0
-      DATABASE_PATH: /data/itsmypassword.db
+      DATABASE_PATH: /data/keyfount.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: ${TRUST_PROXY:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-}

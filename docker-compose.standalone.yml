@@ -1,4 +1,4 @@
-# Standalone stack: ItsMyPassword + Caddy with automatic Let's Encrypt
+# Standalone stack: Keyfount + Caddy with automatic Let's Encrypt
 # TLS. Use this on a VPS where ports 80/443 are free and you don't have
 # another reverse proxy.
 #
@@ -9,12 +9,12 @@
 
 services:
   app:
-    image: ghcr.io/itsmypassword/server:latest
+    image: ghcr.io/keyfount/server:latest
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
       PORT: 8080
-      DATABASE_PATH: /data/itsmypassword.db
+      DATABASE_PATH: /data/keyfount.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-}

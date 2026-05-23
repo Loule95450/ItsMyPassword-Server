@@ -54,7 +54,7 @@ async function registerHelper(
 
   const fin = await client.registerFinish(
     deserializeRegistrationResponse(startBody.response),
-    "itsmypassword-server",
+    "keyfount-server",
   );
   if (fin instanceof Error) throw fin;
 
@@ -136,7 +136,7 @@ async function loginHelper(
   const startBody = startRes.json() as { ke2: number[]; challengeToken: string };
   const ke2 = deserializeKE2(startBody.ke2);
 
-  const finResult = await client.authFinish(ke2, "itsmypassword-server");
+  const finResult = await client.authFinish(ke2, "keyfount-server");
   let ke3Bytes: number[];
   if (finResult instanceof Error) {
     // Client refused — to test the server we still send an arbitrary KE3.

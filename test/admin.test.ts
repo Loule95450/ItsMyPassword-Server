@@ -53,7 +53,7 @@ async function setupAdmin(
   const { response } = start.json() as { response: number[] };
   const fin = await client.registerFinish(
     RegistrationResponse.deserialize(opaqueConfig, response),
-    "itsmypassword-server",
+    "keyfount-server",
   );
   if (fin instanceof Error) throw fin;
   const finRes = await app.inject({
@@ -82,7 +82,7 @@ async function adminLogin(
   const startBody = start.json() as { ke2: number[]; challengeToken: string };
   const finResult = await client.authFinish(
     KE2.deserialize(opaqueConfig, startBody.ke2),
-    "itsmypassword-server",
+    "keyfount-server",
   );
   if (finResult instanceof Error) throw finResult;
   const fin = await app.inject({
@@ -110,7 +110,7 @@ async function userRegister(
   const { response } = start.json() as { response: number[] };
   const fin = await client.registerFinish(
     RegistrationResponse.deserialize(opaqueConfig, response),
-    "itsmypassword-server",
+    "keyfount-server",
   );
   if (fin instanceof Error) throw fin;
   const finRes = await app.inject({
@@ -197,7 +197,7 @@ describe("admin + approval workflow", () => {
       const startBody = start.json() as { ke2: number[]; challengeToken: string };
       const fin = await client.authFinish(
         KE2.deserialize(opaqueConfig, startBody.ke2),
-        "itsmypassword-server",
+        "keyfount-server",
       );
       // Client refuses; we still POST a fabricated ke3 to confirm the
       // server returns the generic 401 envelope.
@@ -306,7 +306,7 @@ describe("admin + approval workflow", () => {
       const startBody = start.json() as { ke2: number[]; challengeToken: string };
       const fin = await client.authFinish(
         KE2.deserialize(opaqueConfig, startBody.ke2),
-        "itsmypassword-server",
+        "keyfount-server",
       );
       if (fin instanceof Error) throw fin;
       const finRes = await app.inject({

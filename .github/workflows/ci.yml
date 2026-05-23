@@ -37,14 +37,14 @@ jobs:
         with:
           context: .
           push: false
-          tags: itsmypassword-server:ci
+          tags: keyfount-server:ci
           load: true
       # Library scan — fails the build on any HIGH/CRITICAL in our app
       # dependencies (lockfile we control). Refresh lockfile to fix.
       - name: Trivy scan (app libs)
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          image-ref: itsmypassword-server:ci
+          image-ref: keyfount-server:ci
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
@@ -55,7 +55,7 @@ jobs:
       - name: Trivy scan (OS, informational)
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          image-ref: itsmypassword-server:ci
+          image-ref: keyfount-server:ci
           severity: CRITICAL,HIGH
           exit-code: "0"
           ignore-unfixed: true

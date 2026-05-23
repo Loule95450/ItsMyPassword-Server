@@ -30,7 +30,7 @@ import {
 import type { Database } from "better-sqlite3";
 
 /** ASCII server identity, baked into the protocol transcript. */
-const SERVER_IDENTITY = "itsmypassword-server";
+const SERVER_IDENTITY = "keyfount-server";
 
 export interface OpaqueService {
   readonly config: Config;

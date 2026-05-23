@@ -83,7 +83,7 @@ export function loadConfig(): Config {
     host: optional("HOST", "0.0.0.0"),
     adminPort,
     adminHost: optional("ADMIN_HOST", "127.0.0.1"),
-    databasePath: optional("DATABASE_PATH", "./data/itsmypassword.db"),
+    databasePath: optional("DATABASE_PATH", "./data/keyfount.db"),
     logLevel: parseLogLevel(optional("LOG_LEVEL", "info")),
     trustProxy: optional("TRUST_PROXY", "true") === "true",
     corsOrigins: origins,

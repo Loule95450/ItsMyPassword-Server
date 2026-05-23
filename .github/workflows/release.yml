@@ -51,8 +51,8 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-            org.opencontainers.image.title=ItsMyPassword Server
-            org.opencontainers.image.description=Self-hostable, zero-knowledge sync server for the ItsMyPassword deterministic password manager.
+            org.opencontainers.image.title=Keyfount Server
+            org.opencontainers.image.description=Self-hostable, zero-knowledge sync server for the Keyfount deterministic password manager.
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.url=https://github.com/${{ github.repository }}

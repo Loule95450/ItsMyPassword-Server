@@ -20,7 +20,7 @@ export const TRANSLATIONS = {
     "common.cancel": "Annuler",
     "common.refresh": "Rafraîchir",
     "common.confirm": "Confirmer",
-    "footer.tagline": "ItsMyPassword Server · Admin",
+    "footer.tagline": "Keyfount Server · Admin",
 
     // Setup
     "setup.label": "étape 0 · setup",
@@ -110,7 +110,7 @@ export const TRANSLATIONS = {
     "common.cancel": "Cancel",
     "common.refresh": "Refresh",
     "common.confirm": "Confirm",
-    "footer.tagline": "ItsMyPassword Server · Admin",
+    "footer.tagline": "Keyfount Server · Admin",
 
     "setup.label": "step 0 · setup",
     "setup.title": "Welcome.",

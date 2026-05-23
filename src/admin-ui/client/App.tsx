@@ -78,7 +78,7 @@ export function App() {
                 <span class="relative h-2 w-2 rounded-full bg-(--color-accent)" />
               </span>
               <strong class="text-sm tracking-tight text-(--color-ink-0)">
-                ItsMyPassword
+                Keyfount
               </strong>
               <span class="mono-tag border-l border-(--color-ink-5) pl-3">
                 {t("brand.admin")}

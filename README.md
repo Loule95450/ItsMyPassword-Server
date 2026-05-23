@@ -1,11 +1,11 @@
-# ItsMyPassword Server
+# Keyfount Server
 
-> Self-hostable, zero-knowledge sync server for the ItsMyPassword browser
+> Self-hostable, zero-knowledge sync server for the Keyfount browser
 > extension (and future mobile clients).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-WIP-orange.svg)](#status)
-[![ghcr.io](https://img.shields.io/badge/ghcr.io-itsmypassword%2Fserver-blue)](https://github.com/ItsMyPassword/server/pkgs/container/server)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-keyfount%2Fserver-blue)](https://github.com/Keyfount/server/pkgs/container/server)
 
 ## What it is
 
@@ -37,9 +37,9 @@ Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR on
 every push to `main` and on every `v*.*.*` tag:
 
 ```
-ghcr.io/itsmypassword/server:latest         # rolling main
-ghcr.io/itsmypassword/server:v0.1.0         # pinned semver
-ghcr.io/itsmypassword/server:sha-abcdef0    # exact commit
+ghcr.io/keyfount/server:latest         # rolling main
+ghcr.io/keyfount/server:v0.1.0         # pinned semver
+ghcr.io/keyfount/server:sha-abcdef0    # exact commit
 ```
 
 ## Deploy
@@ -53,7 +53,7 @@ openssl rand -base64 32
 
 ### Option A — Portainer
 
-1. Stacks → **Add stack** → name it `itsmypassword`.
+1. Stacks → **Add stack** → name it `keyfount`.
 2. Paste the contents of [`docker-compose.yml`](./docker-compose.yml) into
    the editor.
 3. Under **Environment variables**, set at minimum:
@@ -77,7 +77,7 @@ openssl rand -base64 32
 If ports 80/443 are free and you want Caddy to handle Let's Encrypt:
 
 ```bash
-git clone https://github.com/ItsMyPassword/server.git
+git clone https://github.com/Keyfount/server.git
 cd server
 cp .env.example .env
 # set SERVER_HMAC_KEY, DOMAIN=sync.example.com, ACME_EMAIL=you@example.com
@@ -90,7 +90,7 @@ manage).
 ### Option D — Bare `docker compose`
 
 ```bash
-git clone https://github.com/ItsMyPassword/server.git
+git clone https://github.com/Keyfount/server.git
 cd server
 cp .env.example .env
 echo "SERVER_HMAC_KEY=$(openssl rand -base64 32)" >> .env

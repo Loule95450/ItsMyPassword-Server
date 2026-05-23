@@ -47,7 +47,7 @@ async function registerAndLogin(
   const startBody = startRes.json() as { response: number[] };
   const fin = await client.registerFinish(
     RegistrationResponse.deserialize(opaqueConfig, startBody.response),
-    "itsmypassword-server",
+    "keyfount-server",
   );
   if (fin instanceof Error) throw fin;
   const finRes = await app.inject({

@@ -1,7 +1,7 @@
 # Self-hosting runbook
 
 How to deploy, operate, back up, upgrade, and troubleshoot the
-ItsMyPassword sync server. The audience is someone who runs a home
+Keyfount sync server. The audience is someone who runs a home
 NAS or a small VPS, not a fleet of Kubernetes nodes.
 
 ## 1. Prerequisites
@@ -40,7 +40,7 @@ Caddy, bare compose). This document is the long-form version.
 ### 2.2 Standalone (the server stack also owns TLS)
 
 ```bash
-git clone https://github.com/ItsMyPassword/server.git
+git clone https://github.com/Keyfount/server.git
 cd server
 cp .env.example .env
 
@@ -57,16 +57,16 @@ issue a cert within ~30 s. Watch `docker compose logs caddy`.
 
 ## 3. Backup and restore
 
-The entire server state lives in **one SQLite file**: `/data/itsmypassword.db`.
+The entire server state lives in **one SQLite file**: `/data/keyfount.db`.
 
 ### 3.1 Cold backup (simplest)
 
 ```bash
 docker compose down
 docker run --rm \
-  -v itsmypassword_data:/data \
+  -v keyfount_data:/data \
   -v "$PWD/backups:/backup" alpine \
-  tar czf "/backup/itsmypassword-$(date +%F).tar.gz" -C /data .
+  tar czf "/backup/keyfount-$(date +%F).tar.gz" -C /data .
 docker compose up -d
 ```
 
@@ -106,7 +106,7 @@ you reproducible rollbacks. Tag your `latest` deploy by digest if you
 care about supply-chain pinning:
 
 ```yaml
-image: ghcr.io/itsmypassword/server@sha256:<digest>
+image: ghcr.io/keyfount/server@sha256:<digest>
 ```
 
 Migrations run automatically at boot (`src/store/db.ts`). They are
@@ -120,7 +120,7 @@ Statping, Healthchecks.io, or whatever you use. Expected response:
 `200 {"status":"ok"}` in under 50 ms.
 
 Audit events are in the `audit_log` table — query directly with
-`sqlite3 /data/itsmypassword.db "SELECT * FROM audit_log ORDER BY id
+`sqlite3 /data/keyfount.db "SELECT * FROM audit_log ORDER BY id
 DESC LIMIT 20"`. Actions logged: `register`, `login_success`,
 `login_failure`, `logout`, `device_revoke`, `account_delete`.
 
@@ -149,7 +149,7 @@ reset the limiter manually:
 ```bash
 docker compose exec app /nodejs/bin/node -e "
   const Database = require('better-sqlite3');
-  const db = new Database('/data/itsmypassword.db');
+  const db = new Database('/data/keyfount.db');
   db.exec('DELETE FROM login_attempts');
   console.log('cleared');
 "
@@ -167,7 +167,7 @@ a no-vault, no-cloud-of-secrets manager.
 
 ```bash
 docker compose down -v
-docker volume rm itsmypassword_data caddy_data caddy_config
+docker volume rm keyfount_data caddy_data caddy_config
 ```
 
 If you served on a public domain, also revoke the Let's Encrypt cert

@@ -22,7 +22,7 @@ ENV NODE_ENV=production \
     NODE_OPTIONS="--enable-source-maps" \
     PORT=8080 \
     HOST=0.0.0.0 \
-    DATABASE_PATH=/data/itsmypassword.db
+    DATABASE_PATH=/data/keyfount.db
 
 COPY --from=build --chown=nonroot:nonroot /app/node_modules ./node_modules
 COPY --from=build --chown=nonroot:nonroot /app/dist ./dist
