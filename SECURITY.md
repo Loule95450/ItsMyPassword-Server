@@ -48,3 +48,11 @@ by:
 - AES-GCM ciphertexts derived client-side from an Argon2id-stretched key
   the server never sees.
 - HMAC of emails and IPs at rest, with a server-only key.
+
+### At-rest encryption boundary
+
+Payloads are end-to-end encrypted; metadata is not. For a column-by-column
+inventory of what an operator with disk access can and cannot see — and
+recommendations for backup, key management, and FDE — see the
+[at-rest encryption boundary](./docs/threat-model.md#at-rest-encryption-boundary)
+section of the threat model.
