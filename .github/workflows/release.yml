@@ -1,13 +1,18 @@
 name: release
 
+# A release is cut when a pull request is merged into `main` (normally the
+# develop -> main PR). The PR must carry exactly one `release:` label, which
+# decides the version bump. The image is published to GHCR tagged with the
+# resolved version and `latest`; the matching git tag is the source of truth.
+# (Beta images for `develop` are built by ci.yml, not here.)
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [main]
-    tags: ["v*.*.*"]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
 
@@ -20,10 +25,80 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  publish:
+  prepare:
+    name: Resolve version
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve version bump from the PR label
+        id: bump
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          level=$(printf '%s' "$LABELS" | jq -r '.[]' | grep -E '^release:(major|minor|patch)$' | sed 's/release://' || true)
+          count=$(printf '%s' "$level" | grep -c . || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Exactly one release label is required on the PR (release:major | release:minor | release:patch). Found: [${level//$'\n'/, }]"
+            exit 1
+          fi
+          echo "level=$level" >> "$GITHUB_OUTPUT"
+          echo "Bump level: $level"
+
+      - name: Compute next version
+        id: version
+        run: |
+          latest=$(git tag --list 'v*.*.*' --sort=-v:refname | head -n1)
+          latest=${latest:-v0.0.0}
+          ver=${latest#v}
+          major=$(echo "$ver" | cut -d. -f1)
+          minor=$(echo "$ver" | cut -d. -f2)
+          patch=$(echo "$ver" | cut -d. -f3)
+          case "${{ steps.bump.outputs.level }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          new="${major}.${minor}.${patch}"
+          echo "version=${new}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${new}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${latest} -> v${new}"
+
+  verify:
+    name: Verify
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  publish:
+    name: Build & push image (versioned + latest)
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -44,22 +119,19 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=latest
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=Keyfount Server
             org.opencontainers.image.description=Self-hostable, zero-knowledge sync server for the Keyfount deterministic password manager.
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.url=https://github.com/${{ github.repository }}
             org.opencontainers.image.documentation=https://github.com/${{ github.repository }}#readme
 
       - name: Build and push
-        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -71,3 +143,10 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
+
+      - name: Tag the release commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ needs.prepare.outputs.tag }}"
+          git push origin "${{ needs.prepare.outputs.tag }}"
