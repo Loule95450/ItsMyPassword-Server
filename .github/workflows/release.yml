@@ -150,3 +150,23 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ needs.prepare.outputs.tag }}"
           git push origin "${{ needs.prepare.outputs.tag }}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          # Release notes = the PR description, the pull command, then an
+          # auto-generated changelog of the PRs merged since the previous tag.
+          gen=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish=main --jq '.body')
+          {
+            printf '%s\n\n' "$PR_BODY"
+            printf '## Container image\n\n```\ndocker pull ghcr.io/keyfount/server:%s   # or :latest\n```\n\n' "$VERSION"
+            printf '%s\n' "$gen"
+          } > release-notes.md
+          gh release create "$TAG" --target main \
+            --title "Keyfount Server $TAG" \
+            --notes-file release-notes.md --latest
